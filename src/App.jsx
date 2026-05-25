@@ -174,6 +174,8 @@ function processData(rows) {
       const max1RM = _.maxBy(sets, r => calc1RM(parseFloat(r.Weight) || 0, parseFloat(r.Reps) || 0));
       const totalVol = _.sumBy(sets, r => (parseFloat(r.Weight) || 0) * (parseFloat(r.Reps) || 0));
       const bestSet = _.maxBy(sets, r => parseFloat(r.Weight) || 0);
+      const maxRepsSet = _.maxBy(sets, r => parseFloat(r.Reps) || 0);
+      const totalReps = _.sumBy(sets, r => parseFloat(r.Reps) || 0);
       return {
         date,
         dateLabel: fmtChartDate(date),
@@ -181,9 +183,37 @@ function processData(rows) {
         volume: Math.round(totalVol),
         bestWeight: parseFloat(bestSet?.Weight || 0),
         bestReps: parseFloat(bestSet?.Reps || 0),
+        maxReps: parseFloat(maxRepsSet?.Reps || 0),
+        totalReps: Math.round(totalReps),
+        setCount: sets.length,
       };
     });
+    // Add running PR 1RM (never decreases)
+    let runningMax1RM = 0;
+    pts.forEach(p => {
+      runningMax1RM = Math.max(runningMax1RM, p.estimated1RM);
+      p.pr1RM = runningMax1RM;
+    });
     if (pts.length > 0) exProgression[ex] = pts;
+  });
+
+  // Exercise history: all raw sets per exercise, grouped by session date
+  const exHistory = {};
+  exercises.forEach(ex => {
+    const exSets = working.filter(r => r['Exercise Name'] === ex);
+    const bySessions = _.groupBy(exSets, r => r.Date.split(' ')[0]);
+    exHistory[ex] = Object.keys(bySessions).sort().reverse().map(date => {
+      const sets = bySessions[date];
+      return {
+        date,
+        workoutName: sets[0]?.['Workout Name'] || '',
+        sets: sets.map(r => ({
+          weight: parseFloat(r.Weight) || 0,
+          reps: parseFloat(r.Reps) || 0,
+          oneRM: calc1RM(parseFloat(r.Weight) || 0, parseFloat(r.Reps) || 0),
+        })),
+      };
+    });
   });
 
   // Weekly volume for heatmap
@@ -220,6 +250,7 @@ function processData(rows) {
     longestStreak,
     prs,
     exProgression,
+    exHistory,
     weeklyData,
     topExercises,
     sessionDates,
@@ -360,8 +391,10 @@ const UploadScreen = ({ onData }) => {
 // Exercise Progression View
 const ExerciseView = ({ data, exercise }) => {
   const [metric, setMetric] = useState('oneRM');
+  const [view, setView] = useState('charts');
   const prog = data.exProgression[exercise];
   const pr = data.prs[exercise];
+  const history = data.exHistory[exercise] || [];
 
   if (!prog || prog.length === 0) {
     return <div style={{ color: C.muted, padding: 20, fontFamily: 'monospace', fontSize: 13 }}>
@@ -370,13 +403,13 @@ const ExerciseView = ({ data, exercise }) => {
   }
 
   const chartData = prog;
-  const allTime1RM = Math.max(...prog.map(p => p.estimated1RM));
-  const allTimeVol = Math.max(...prog.map(p => p.volume));
 
   const metrics = [
     { key: 'oneRM', label: 'Est. 1RM', color: C.accent, unit: 'kg', dataKey: 'estimated1RM' },
+    { key: 'pr1RM', label: 'PR Progression', color: '#f0a500', unit: 'kg', dataKey: 'pr1RM' },
     { key: 'volume', label: 'Session Volume', color: C.accent2, unit: 'kg', dataKey: 'volume' },
     { key: 'bestWeight', label: 'Best Weight', color: C.accent3, unit: 'kg', dataKey: 'bestWeight' },
+    { key: 'maxReps', label: 'Max Reps', color: '#a78bfa', unit: ' reps', dataKey: 'maxReps' },
   ];
   const active = metrics.find(m => m.key === metric);
 
@@ -387,68 +420,168 @@ const ExerciseView = ({ data, exercise }) => {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {metrics.map(m => (
-          <button key={m.key} onClick={() => setMetric(m.key)} style={{
-            background: metric === m.key ? m.color : 'transparent',
-            color: metric === m.key ? '#000' : C.muted,
-            border: `1px solid ${metric === m.key ? m.color : C.border}`,
-            borderRadius: 6, padding: '6px 14px', cursor: 'pointer',
+      {/* View toggle */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
+        {['charts', 'history'].map(v => (
+          <button key={v} onClick={() => setView(v)} style={{
+            background: view === v ? C.accent : 'transparent',
+            color: view === v ? '#000' : C.muted,
+            border: `1px solid ${view === v ? C.accent : C.border}`,
+            borderRadius: 6, padding: '6px 16px', cursor: 'pointer',
             fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.08em',
             textTransform: 'uppercase', transition: 'all 0.15s', fontWeight: 600,
           }}>
-            {m.label}
+            {v}
           </button>
         ))}
       </div>
 
-      {/* Mini stat row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20 }}>
-        <div style={{ background: C.surface, borderRadius: 8, padding: '12px 14px', border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>PR 1RM</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.accent, fontFamily: '"Bebas Neue",sans-serif' }}>{pr?.best1RM || '—'}<span style={{ fontSize: 12, color: C.muted }}> kg</span></div>
-        </div>
-        <div style={{ background: C.surface, borderRadius: 8, padding: '12px 14px', border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Best Weight</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.accent3, fontFamily: '"Bebas Neue",sans-serif' }}>{pr?.bestWeight || '—'}<span style={{ fontSize: 12, color: C.muted }}> kg</span></div>
-        </div>
-        <div style={{ background: C.surface, borderRadius: 8, padding: '12px 14px', border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Total Sets</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: C.accent2, fontFamily: '"Bebas Neue",sans-serif' }}>{pr?.totalSets || 0}</div>
-        </div>
-      </div>
+      {view === 'charts' && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+            {metrics.map(m => (
+              <button key={m.key} onClick={() => setMetric(m.key)} style={{
+                background: metric === m.key ? m.color : 'transparent',
+                color: metric === m.key ? '#000' : C.muted,
+                border: `1px solid ${metric === m.key ? m.color : C.border}`,
+                borderRadius: 6, padding: '6px 14px', cursor: 'pointer',
+                fontSize: 11, fontFamily: 'monospace', letterSpacing: '0.08em',
+                textTransform: 'uppercase', transition: 'all 0.15s', fontWeight: 600,
+              }}>
+                {m.label}
+              </button>
+            ))}
+          </div>
 
-      {pct !== null && (
-        <div style={{
-          fontFamily: 'monospace', fontSize: 11, color: pct >= 0 ? C.accent : C.red,
-          marginBottom: 12, letterSpacing: '0.05em',
-        }}>
-          {pct >= 0 ? '▲' : '▼'} {Math.abs(pct)}% {active.label} from first to last session ({prog.length} sessions logged)
-        </div>
+          {/* Mini stat row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20 }}>
+            <div style={{ background: C.surface, borderRadius: 8, padding: '12px 14px', border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>PR 1RM</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.accent, fontFamily: '"Bebas Neue",sans-serif' }}>{pr?.best1RM || '—'}<span style={{ fontSize: 12, color: C.muted }}> kg</span></div>
+            </div>
+            <div style={{ background: C.surface, borderRadius: 8, padding: '12px 14px', border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Best Weight</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.accent3, fontFamily: '"Bebas Neue",sans-serif' }}>{pr?.bestWeight || '—'}<span style={{ fontSize: 12, color: C.muted }}> kg</span></div>
+            </div>
+            <div style={{ background: C.surface, borderRadius: 8, padding: '12px 14px', border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>Total Sets</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: C.accent2, fontFamily: '"Bebas Neue",sans-serif' }}>{pr?.totalSets || 0}</div>
+            </div>
+          </div>
+
+          {pct !== null && (
+            <div style={{
+              fontFamily: 'monospace', fontSize: 11, color: pct >= 0 ? C.accent : C.red,
+              marginBottom: 12, letterSpacing: '0.05em',
+            }}>
+              {pct >= 0 ? '▲' : '▼'} {Math.abs(pct)}% {active.label} from first to last session ({prog.length} sessions logged)
+            </div>
+          )}
+
+          <div style={{ height: 260 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <defs>
+                  <linearGradient id={`grad_${metric}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={active.color} stopOpacity={0.2} />
+                    <stop offset="95%" stopColor={active.color} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                <XAxis dataKey="dateLabel" tick={{ fill: C.muted, fontSize: 10, fontFamily: 'monospace' }} tickLine={false} axisLine={false}
+                  interval={Math.floor(chartData.length / 6)} />
+                <YAxis tick={{ fill: C.muted, fontSize: 10, fontFamily: 'monospace' }} tickLine={false} axisLine={false}
+                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v} />
+                <Tooltip content={
+                  active.key === 'volume'
+                    ? ({ active: a, payload, label }) => {
+                        if (!a || !payload?.length) return null;
+                        const d = payload[0]?.payload;
+                        return (
+                          <div style={{ background: '#1a1d2a', border: `1px solid ${C.border2}`, borderRadius: 8, padding: '10px 14px', fontSize: 12, color: C.text }}>
+                            <div style={{ color: C.muted, marginBottom: 6, fontFamily: 'monospace' }}>{label}</div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 2 }}>
+                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: active.color, display: 'inline-block' }} />
+                              <span style={{ color: C.muted }}>Volume:</span>
+                              <span style={{ fontWeight: 600 }}>{d?.volume?.toLocaleString()} kg</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 2 }}>
+                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'transparent', display: 'inline-block' }} />
+                              <span style={{ color: C.muted }}>Reps:</span>
+                              <span style={{ fontWeight: 600 }}>{d?.totalReps}</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'transparent', display: 'inline-block' }} />
+                              <span style={{ color: C.muted }}>Sets:</span>
+                              <span style={{ fontWeight: 600 }}>{d?.setCount}</span>
+                            </div>
+                          </div>
+                        );
+                      }
+                    : <CustomTooltipBase unit={active.unit} />
+                } />
+                <Area type="monotone" dataKey={active.dataKey} name={active.label}
+                  stroke={active.color} strokeWidth={2} fill={`url(#grad_${metric})`}
+                  dot={chartData.length < 30 ? { fill: active.color, strokeWidth: 0, r: 3 } : false}
+                  activeDot={{ r: 5, fill: active.color }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </>
       )}
 
-      <div style={{ height: 260 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-            <defs>
-              <linearGradient id={`grad_${metric}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={active.color} stopOpacity={0.2} />
-                <stop offset="95%" stopColor={active.color} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
-            <XAxis dataKey="dateLabel" tick={{ fill: C.muted, fontSize: 10, fontFamily: 'monospace' }} tickLine={false} axisLine={false}
-              interval={Math.floor(chartData.length / 6)} />
-            <YAxis tick={{ fill: C.muted, fontSize: 10, fontFamily: 'monospace' }} tickLine={false} axisLine={false}
-              tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v} />
-            <Tooltip content={<CustomTooltipBase unit={` ${active.unit}`} />} />
-            <Area type="monotone" dataKey={active.dataKey} name={active.label}
-              stroke={active.color} strokeWidth={2} fill={`url(#grad_${metric})`}
-              dot={chartData.length < 30 ? { fill: active.color, strokeWidth: 0, r: 3 } : false}
-              activeDot={{ r: 5, fill: active.color }} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {view === 'history' && (
+        <div>
+          {history.length === 0 ? (
+            <div style={{ color: C.muted, fontFamily: 'monospace', fontSize: 13 }}>No history found.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 480, overflowY: 'auto', paddingRight: 4 }}>
+              {history.map((session, i) => (
+                <div key={i} style={{
+                  background: C.surface, border: `1px solid ${C.border}`,
+                  borderRadius: 10, padding: '14px 16px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div>
+                      <span style={{ fontFamily: 'monospace', fontSize: 13, color: C.text, fontWeight: 600 }}>
+                        {fmtShortDate(session.date)}
+                      </span>
+                      {session.workoutName && (
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: C.muted, marginLeft: 10 }}>
+                          {session.workoutName}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <span style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>
+                        {session.sets.length} sets
+                      </span>
+                      <span style={{ fontSize: 10, color: C.accent, fontFamily: 'monospace', fontWeight: 600 }}>
+                        Best 1RM: {Math.max(...session.sets.map(s => s.oneRM))} kg
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {session.sets.map((s, j) => (
+                      <div key={j} style={{
+                        background: C.card, border: `1px solid ${C.border2}`,
+                        borderRadius: 6, padding: '5px 10px', fontSize: 11, fontFamily: 'monospace',
+                      }}>
+                        <span style={{ color: C.text, fontWeight: 600 }}>{s.weight} kg</span>
+                        <span style={{ color: C.muted }}> × </span>
+                        <span style={{ color: C.text, fontWeight: 600 }}>{s.reps}</span>
+                        {s.oneRM > 0 && s.reps > 1 && (
+                          <span style={{ color: C.muted, fontSize: 10 }}> ({s.oneRM} kg)</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
