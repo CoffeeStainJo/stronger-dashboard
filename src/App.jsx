@@ -75,6 +75,20 @@ const isWorkingSet = (setOrder) => {
   return s !== 'W' && s !== '';
 };
 
+// ─── RESPONSIVE ───────────────────────────────────────────────────────────────
+// Mobile-only style overrides; desktop layout is left untouched.
+function useIsMobile(breakpoint = 768) {
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth <= breakpoint : false
+  );
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= breakpoint);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 // ─── DATA PROCESSING ──────────────────────────────────────────────────────────
 function processData(rows) {
   if (!rows || rows.length === 0) return null;
@@ -676,6 +690,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [searchEx, setSearchEx] = useState('');
   const [historyPage, setHistoryPage] = useState(0);
+  const isMobile = useIsMobile();
 
   const data = useMemo(() => rawData ? processData(rawData) : null, [rawData]);
 
@@ -753,7 +768,7 @@ export default function App() {
         background: `${C.bg}e0`, backdropFilter: 'blur(16px)',
         borderBottom: `1px solid ${C.border}`,
       }}>
-        <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 56 }}>
+        <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '10px 14px' : '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: isMobile ? 'auto' : 56, flexWrap: isMobile ? 'wrap' : 'nowrap', gap: isMobile ? 10 : 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontSize: 24, fontFamily: '"Bebas Neue",sans-serif', letterSpacing: '0.05em', color: C.text }}>
               LIFT<span style={{ color: C.accent }}>LOG</span>
@@ -762,7 +777,7 @@ export default function App() {
               {fmtShortDate(data.dateRange.start)} — {fmtShortDate(data.dateRange.end)}
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 4 }}>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: isMobile ? 'flex-start' : 'flex-end', width: isMobile ? '100%' : 'auto' }}>
             {tabs.map(t => (
               <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
                 background: activeTab === t.key ? `${C.accent}18` : 'transparent',
@@ -782,7 +797,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 20px', position: 'relative', zIndex: 1 }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '16px 12px' : '24px 20px', position: 'relative', zIndex: 1 }}>
 
         {/* ── OVERVIEW TAB ── */}
         {activeTab === 'overview' && (
@@ -803,7 +818,7 @@ export default function App() {
             </div>
 
             {/* Weekly volume chart */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16, marginBottom: 20 }}>
               <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '20px 22px' }}>
                 <SectionTitle accent={C.accent2}>Weekly Volume</SectionTitle>
                 <div style={{ height: 200 }}>
@@ -892,11 +907,12 @@ export default function App() {
                 style={{
                   background: C.card, border: `1px solid ${C.border}`, borderRadius: 8,
                   padding: '8px 14px', color: C.text, fontFamily: 'inherit', fontSize: 12,
-                  width: 220, outline: 'none',
+                  width: isMobile ? '100%' : 220, boxSizing: 'border-box', outline: 'none',
                 }}
               />
               <div style={{
                 display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1,
+                width: isMobile ? '100%' : 'auto',
                 maxHeight: 80, overflowY: 'auto',
               }}>
                 {filteredExercises.slice(0, 20).map(ex => (
@@ -980,7 +996,8 @@ export default function App() {
         {activeTab === 'prs' && (
           <div>
             <SectionTitle accent={C.accent}>Personal Records</SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 0 }}>
+            <div style={{ overflowX: isMobile ? 'auto' : 'visible', WebkitOverflowScrolling: 'touch' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 0, minWidth: isMobile ? 560 : 'auto' }}>
               <div style={{
                 display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr',
                 background: C.surface, borderRadius: '10px 10px 0 0',
@@ -1027,6 +1044,7 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+            </div>
             </div>
           </div>
         )}
